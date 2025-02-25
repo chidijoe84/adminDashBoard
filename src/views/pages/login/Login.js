@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   CButton,
   CCard,
@@ -15,8 +15,34 @@ import {
 } from '@coreui/react'
 import CIcon from '@coreui/icons-react'
 import { cilLockLocked, cilUser } from '@coreui/icons'
+import { useFormik } from 'formik'
+import * as Yup from 'yup'
+// import { useNavigate } from 'react-router-dom'
 
 const Login = () => {
+  const navigate = useNavigate()
+
+  // Formik setup
+  const formik = useFormik({
+    initialValues: {
+      username: '',
+      password: '',
+    },
+    validationSchema: Yup.object({
+      username: Yup.string().required('Username is required'),
+      password: Yup.string()
+        .min(6, 'Password must be at least 6 characters')
+        .required('Password is required'),
+    }),
+    onSubmit: (values) => {
+      // Save to localStorage
+      localStorage.setItem('subscriberInformation', JSON.stringify(values))
+
+      // Redirect to dashboard
+      navigate('/dashboard')
+    },
+  })
+
   return (
     <div className="bg-body-tertiary min-vh-100 d-flex flex-row align-items-center">
       <CContainer>
@@ -25,15 +51,27 @@ const Login = () => {
             <CCardGroup>
               <CCard className="p-4">
                 <CCardBody>
-                  <CForm>
+                  <CForm onSubmit={formik.handleSubmit}>
                     <h1>Login</h1>
                     <p className="text-body-secondary">Sign In to your account</p>
+
+                    {/* Username Input */}
                     <CInputGroup className="mb-3">
                       <CInputGroupText>
                         <CIcon icon={cilUser} />
                       </CInputGroupText>
-                      <CFormInput placeholder="Username" autoComplete="username" />
+                      <CFormInput
+                        type="text"
+                        placeholder="Username"
+                        autoComplete="username"
+                        {...formik.getFieldProps('username')}
+                      />
                     </CInputGroup>
+                    {formik.touched.username && formik.errors.username ? (
+                      <div style={{ color: 'red', fontSize: '14px' }}>{formik.errors.username}</div>
+                    ) : null}
+
+                    {/* Password Input */}
                     <CInputGroup className="mb-4">
                       <CInputGroupText>
                         <CIcon icon={cilLockLocked} />
@@ -42,11 +80,17 @@ const Login = () => {
                         type="password"
                         placeholder="Password"
                         autoComplete="current-password"
+                        {...formik.getFieldProps('password')}
                       />
                     </CInputGroup>
+                    {formik.touched.password && formik.errors.password ? (
+                      <div style={{ color: 'red', fontSize: '14px' }}>{formik.errors.password}</div>
+                    ) : null}
+
+                    {/* Login Button */}
                     <CRow>
                       <CCol xs={6}>
-                        <CButton color="primary" className="px-4">
+                        <CButton type="submit" color="primary" className="px-4">
                           Login
                         </CButton>
                       </CCol>
