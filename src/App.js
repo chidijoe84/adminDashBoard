@@ -35,8 +35,8 @@ const App = () => {
     setColorMode(storedTheme)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isAuthenticated = localStorage.getItem('subscriberInformation')
-
+  const isAuthenticated = localStorage.getItem('wardAdmin')
+    
   return (
     <HashRouter>
       <Suspense

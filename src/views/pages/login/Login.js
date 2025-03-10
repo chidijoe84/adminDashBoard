@@ -36,7 +36,7 @@ const Login = () => {
     }),
     onSubmit: (values) => {
       // Save to localStorage
-      localStorage.setItem('subscriberInformation', JSON.stringify(values))
+      localStorage.setItem('wardAdmin', JSON.stringify(values))
 
       // Redirect to dashboard
       navigate('/dashboard')

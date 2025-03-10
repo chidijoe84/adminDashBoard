@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   CCard,
   CCardBody,
@@ -22,32 +22,86 @@ import {
   CCardFooter,
 } from '@coreui/react'
 import { Link } from 'react-router-dom'
+import axios from 'axios'
+import { useFormik } from 'formik'
+import * as Yup from 'yup'
 
 const RoleManagement = () => {
   const [roles, setRoles] = useState([])
   const [roleName, setRoleName] = useState('')
+  const [userList, setUsersList] = useState('')
   const [modalAssignVisible, setModalAssignVisible] = useState(false)
   const [modalEditVisible, setModalEditVisible] = useState(false)
   const [showUserRole, setShowUsersRole] = useState(false)
   const [selectedRole, setSelectedRole] = useState(null)
   const [selectedUser, setSelectedUser] = useState('')
   const [editRoleName, setEditRoleName] = useState('')
+  const [subscribers, setSubscribers] = useState([])
+  const [isLoaded, setIsLoaded] = useState(false)
+  const [usersWithRole, setUsersWithRole] = useState([])
+  const [selectedUserRole, setSelectedUserRole] = useState(null)
 
-  const users = ['John Doe', 'Jane Smith', 'Alice Johnson'] // Example users
-
-  // Create Role
-  const addRole = () => {
-    if (roleName.trim()) {
-      const newRole = { id: roles.length + 1, name: roleName }
-      console.log('Role Data to Send:', newRole)
-
-      // Update the state to include the new role
-      setRoles((prevRoles) => [...prevRoles, newRole])
-
-      // Clear input field
-      setRoleName('')
+  const fetchSubscribers = async () => {
+    if (!isLoaded) {
+      try {
+        const response = await axios.get(
+          'http://localhost:4001/api/v1/createSubscriber/listSubscribers',
+        )
+        console.log('response', response)
+        setSubscribers(response.data.data)
+        setIsLoaded(true)
+      } catch (error) {
+        console.error('Error fetching subscribers:', error)
+      }
     }
   }
+
+  // Create Role
+  const addRole = async () => {
+    if (roleName.trim()) {
+      try {
+        const roleData = {
+          roleName: roleName,
+          createdBy: 'admin_user',
+        }
+
+        console.log('Role Data to Send:', roleData)
+
+        const response = await axios.post(
+          'http://localhost:4001/api/v1/accessRole/createRole',
+          roleData,
+        )
+
+        if (response.data.success) {
+          console.log('Role Created Successfully:', response.data)
+
+          const allAccessRole = await axios.get(
+            'http://localhost:4001/api/v1/accessRole/getAllRoles',
+          )
+          console.log('allAccessRole', allAccessRole.data.data)
+          // Update the state with the new role
+          setRoles(allAccessRole.data.data)
+        } else {
+          console.error('Failed to create role:', response.data.message)
+        }
+
+        // Clear input field
+        setRoleName('')
+      } catch (error) {
+        console.error('Error creating role:', error.response?.data || error.message)
+      }
+    }
+  }
+
+  useEffect(() => {
+    const getAllRoles = async () => {
+      const allAccessRole = await axios.get('http://localhost:4001/api/v1/accessRole/getAllRoles')
+      console.log('allAccessRole', allAccessRole.data.data)
+      // Update the state with the new role
+      setRoles(allAccessRole.data.data)
+    }
+    getAllRoles()
+  }, [])
 
   // Open Assign Role Modal
   const openAssignModal = (role) => {
@@ -55,59 +109,104 @@ const RoleManagement = () => {
     setModalAssignVisible(true)
   }
 
-  // Assign Role
-  const assignRole = async () => {
-    if (!selectedRole || !selectedUser) return
+  // Define form validation schema
+  const validationSchema = Yup.object().shape({
+    userId: Yup.string().required('User is required'),
+    userLevel: Yup.string().required('User Type is required'),
+    userResourceLevel: Yup.string().required('User Group is required'),
+  })
 
-    const assignmentData = { roleId: selectedRole.id, userName: selectedUser }
-    console.log('Assigning Role:', assignmentData)
+  // Initialize Formik
+  const formik = useFormik({
+    initialValues: {
+      userId: selectedUserRole?.userId || '',
+      userLevel: selectedUserRole?.userLevel || '',
+      userResourceLevel: selectedUserRole?.userResourceLevel || '',
+    },
+    enableReinitialize: true, // Ensures form updates when selectedUserRole changes
+    validationSchema,
+    onSubmit: async (values, { setSubmitting, resetForm }) => {
+      const assignmentData = {
+        ...values,
+        roleId: selectedUserRole?.roleId, // Include roleId for updates
+        assignedBy: 'Admin-123',
+      }
 
-    
-      console.log('Role Assigned:', assignmentData)
+      try {
+        let response
+        if (selectedUserRole) {
+          // If selectedUserRole exists, update the role
+          response = await axios.post(
+            `http://localhost:4001/api/v1/assignUserAccessRole/updateUserRole/${formik.values.userId}`,
+            assignmentData,
+            { headers: { 'Content-Type': 'application/json' } },
+          )
+        } else {
+          // Otherwise, assign a new role
+          response = await axios.post(
+            'http://localhost:4001/api/v1/assignUserAccessRole/assignUserRole',
+            assignmentData,
+            { headers: { 'Content-Type': 'application/json' } },
+          )
+        }
 
-      setModalAssignVisible(false)
-      setSelectedUser('')
-    
-  }
+        if (response.status === 201 || response.status === 200) {
+          console.log('Role Assigned/Updated Successfully:', response.data)
+          fetchSubscribersRole() // Refresh the roles list
+          setModalEditVisible(false) // Close the modal
+          resetForm() // Reset the form
+        }
+      } catch (error) {
+        if (error.response) {
+          const { status, data } = error.response
 
-  // Open Edit Role Modal
-  const openEditModal = (role) => {
-    setSelectedRole(role)
-    setEditRoleName(role.name)
-    setModalEditVisible(true)
-  }
+          if (status === 409) {
+            alert(data.message || 'User already has a role assigned.')
+          } else {
+            alert(data.message || 'Failed to assign role. Please try again.')
+          }
 
-  // Edit Role
-  const editRole = async () => {
-    if (!selectedRole || !editRoleName.trim()) return
+          console.error('Error assigning/updating role:', data)
+        } else {
+          console.error('Error assigning/updating role:', error.message)
+          alert('Network error. Please check your connection.')
+        }
+      } finally {
+        setSubmitting(false)
+      }
+    },
+  })
 
-    const updatedRole = { name: editRoleName }
-    console.log('Editing Role:', selectedRole.id, updatedRole)
-
+  const fetchSubscribersRole = async () => {
     try {
-      const response = await fetch(`/api/roles/${selectedRole.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedRole),
-      })
-      const data = await response.json()
-      console.log('Role Updated:', data)
-
-      setRoles(
-        roles.map((role) => (role.id === selectedRole.id ? { ...role, name: editRoleName } : role)),
+      const response = await axios.get(
+        'http://localhost:4001/api/v1/assignUserAccessRole/listSubscribersWithRoles',
       )
-      setModalEditVisible(false)
-    } catch (error) {
-      console.error('Error updating role:', error)
+      setUsersWithRole(response.data.data)
+    } catch (err) {
+      setError('Failed to fetch subscribers')
+    } finally {
+      setLoading(false)
     }
   }
 
-  // Toggle between Roles and User Roles View
+  useEffect(() => {
+    fetchSubscribersRole()
+  }, [])
+
+  // Open Edit Role Modal
+  const openEditModal = (role) => {
+    fetchSubscribers()
+    console.log('selected user role', role)
+    setSelectedUserRole(role)
+    setEditRoleName(role)
+    setModalEditVisible(true)
+  }
+
+ 
   const toggleRoleView = () => {
     setShowUsersRole(!showUserRole)
   }
-
-  console.log('roles', roles)
 
   return (
     <div className="p-4">
@@ -149,25 +248,33 @@ const RoleManagement = () => {
                   <CTableHeaderCell>#</CTableHeaderCell>
                   <CTableHeaderCell>Name</CTableHeaderCell>
                   <CTableHeaderCell>Role Name</CTableHeaderCell>
+                  <CTableHeaderCell>subscriber Level</CTableHeaderCell>
+                  <CTableHeaderCell>Resource available</CTableHeaderCell>
                   <CTableHeaderCell>Actions</CTableHeaderCell>
                 </CTableRow>
               </CTableHead>
               <CTableBody>
-                {roles.map((role) => (
-                  <CTableRow key={role.id}>
-                    <CTableDataCell>{role.id}</CTableDataCell>
-                    <CTableDataCell>{role.name}</CTableDataCell>
-                    <CTableDataCell>
-                      <CButton
-                        color="success"
-                        style={{ color: 'white' }}
-                        onClick={() => openAssignModal(role)}
-                      >
-                        Edit Role
-                      </CButton>
-                    </CTableDataCell>
-                  </CTableRow>
-                ))}
+                {usersWithRole &&
+                  usersWithRole.map((role, index) => (
+                    <CTableRow key={role.userId}>
+                      <CTableDataCell>{index + 1}</CTableDataCell>
+                      <CTableDataCell>
+                        {role.firstName} {role.lastName}
+                      </CTableDataCell>
+                      <CTableDataCell>{role.roleName}</CTableDataCell>
+                      <CTableDataCell>{role.userLevel}</CTableDataCell>
+                      <CTableDataCell>{role.userResourceLevel}</CTableDataCell>
+                      <CTableDataCell>
+                        <CButton
+                          color="success"
+                          style={{ color: 'white' }}
+                          onClick={() => openEditModal(role)}
+                        >
+                          Edit Role
+                        </CButton>
+                      </CTableDataCell>
+                    </CTableRow>
+                  ))}
               </CTableBody>
             </CTable>
           </CCardBody>
@@ -185,22 +292,22 @@ const RoleManagement = () => {
                 </CTableRow>
               </CTableHead>
               <CTableBody>
-                {roles.map((role) => (
-                  <CTableRow key={role.id}>
-                    <CTableDataCell>{role.id}</CTableDataCell>
-                    <CTableDataCell>{role.name}</CTableDataCell>
-                    <CTableDataCell>
-                      <CButton
-                        color="success"
-                        style={{ color: 'white' }}
-                        onClick={() => openAssignModal(role)}
-                      >
-                        Assign Role
-                      </CButton>
-                     
-                    </CTableDataCell>
-                  </CTableRow>
-                ))}
+                {roles &&
+                  roles?.map((role, index) => (
+                    <CTableRow key={role.id}>
+                      <CTableDataCell>{index + 1}</CTableDataCell>
+                      <CTableDataCell>{role.roleName}</CTableDataCell>
+                      <CTableDataCell>
+                        <CButton
+                          color="success"
+                          style={{ color: 'white' }}
+                          onClick={() => openAssignModal(role)}
+                        >
+                          Assign Role
+                        </CButton>
+                      </CTableDataCell>
+                    </CTableRow>
+                  ))}
               </CTableBody>
             </CTable>
           </CCardBody>
@@ -212,24 +319,170 @@ const RoleManagement = () => {
         <CModalHeader>
           <CModalTitle>Assign Role</CModalTitle>
         </CModalHeader>
-        <CModalBody>
-          <CFormSelect value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}>
-            <option>Select a user</option>
-            {users.map((user, index) => (
-              <option key={index} value={user}>
-                {user}
-              </option>
-            ))}
-          </CFormSelect>
-        </CModalBody>
-        <CModalFooter>
-          <CButton color="secondary" onClick={() => setModalAssignVisible(false)}>
-            Cancel
-          </CButton>
-          <CButton color="primary" onClick={assignRole}>
-            Assign
-          </CButton>
-        </CModalFooter>
+        <form onSubmit={formik.handleSubmit}>
+          <CModalBody>
+            {/* Select User */}
+            <CFormSelect
+              name="userId"
+              value={formik.values.userId}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
+              onClick={fetchSubscribers} // Fetch subscribers when dropdown is clicked
+              className={formik.errors.userId && formik.touched.userId ? 'is-invalid' : ''}
+            >
+              <option value="">Select a user</option>
+              {subscribers.map((user) => (
+                <option key={user.userId} value={user.userId}>
+                  {user.firstName} {user.lastName} ({user.emailAddress})
+                </option>
+              ))}
+            </CFormSelect>
+            {formik.touched.userId && formik.errors.userId && (
+              <div className="text-danger">{formik.errors.userId}</div>
+            )}
+            <br />
+
+            {/* Select User Type */}
+            <CFormSelect
+              name="userLevel"
+              value={formik.values.userLevel}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
+              className={formik.errors.userLevel && formik.touched.userLevel ? 'is-invalid' : ''}
+            >
+              <option value="">Select User Type</option>
+              <option value="regular">Regular User</option>
+              <option value="authorized">Authorized User</option>
+            </CFormSelect>
+            {formik.touched.userLevel && formik.errors.userLevel && (
+              <div className="text-danger">{formik.errors.userLevel}</div>
+            )}
+
+            <br />
+
+            {/* Select User Group */}
+            <CFormSelect
+              name="userResourceLevel"
+              value={formik.values.userResourceLevel}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
+              className={
+                formik.errors.userResourceLevel && formik.touched.userResourceLevel
+                  ? 'is-invalid'
+                  : ''
+              }
+            >
+              <option value="">Select User Group</option>
+              <option value="State">State</option>
+              <option value="LGA">LGA</option>
+              <option value="Ward">Ward</option>
+              <option value="Quota">Quota</option>
+              <option value="Town">Town</option>
+              <option value="Kindred">Kindred</option>
+            </CFormSelect>
+            {formik.touched.userResourceLevel && formik.errors.userResourceLevel && (
+              <div className="text-danger">{formik.errors.userResourceLevel}</div>
+            )}
+          </CModalBody>
+
+          <CModalFooter>
+            <CButton color="secondary" type="button" onClick={() => setModalAssignVisible(false)}>
+              Cancel
+            </CButton>
+            <CButton color="primary" type="submit" disabled={formik.isSubmitting}>
+              {formik.isSubmitting ? 'Assigning...' : 'Assign'}
+            </CButton>
+          </CModalFooter>
+        </form>
+      </CModal>
+
+      {/* edit role  */}
+
+      <CModal visible={modalEditVisible} onClose={() => setModalEditVisible(false)}>
+        <CModalHeader>
+          <CModalTitle>{selectedUserRole ? 'Edit Role' : 'Assign Role'}</CModalTitle>
+        </CModalHeader>
+        <form onSubmit={formik.handleSubmit}>
+          <CModalBody>
+            {/* Select User (Disabled in Edit Mode) */}
+            <CFormSelect
+              name="userId"
+              value={formik.values.userId}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
+              onClick={fetchSubscribers} // Fetch subscribers when dropdown is clicked
+              className={formik.errors.userId && formik.touched.userId ? 'is-invalid' : ''}
+              disabled={!!selectedUserRole} // Disable user selection in edit mode
+            >
+              <option value="">Select a user</option>
+              {subscribers.map((user) => (
+                <option key={user.userId} value={user.userId}>
+                  {user.firstName} {user.lastName} ({user.emailAddress})
+                </option>
+              ))}
+            </CFormSelect>
+            {formik.touched.userId && formik.errors.userId && (
+              <div className="text-danger">{formik.errors.userId}</div>
+            )}
+            <br />
+
+            {/* Select User Type */}
+            <CFormSelect
+              name="userLevel"
+              value={formik.values.userLevel}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
+              className={formik.errors.userLevel && formik.touched.userLevel ? 'is-invalid' : ''}
+            >
+              <option value="">Select User Type</option>
+              <option value="regular">Regular User</option>
+              <option value="authorized">Authorized User</option>
+            </CFormSelect>
+            {formik.touched.userLevel && formik.errors.userLevel && (
+              <div className="text-danger">{formik.errors.userLevel}</div>
+            )}
+            <br />
+
+            {/* Select User Group */}
+            <CFormSelect
+              name="userResourceLevel"
+              value={formik.values.userResourceLevel}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
+              className={
+                formik.errors.userResourceLevel && formik.touched.userResourceLevel
+                  ? 'is-invalid'
+                  : ''
+              }
+            >
+              <option value="">Select User Group</option>
+              <option value="State">State</option>
+              <option value="LGA">LGA</option>
+              <option value="Ward">Ward</option>
+              <option value="Quota">Quota</option>
+              <option value="Town">Town</option>
+              <option value="Kindred">Kindred</option>
+            </CFormSelect>
+            {formik.touched.userResourceLevel && formik.errors.userResourceLevel && (
+              <div className="text-danger">{formik.errors.userResourceLevel}</div>
+            )}
+          </CModalBody>
+
+          <CModalFooter>
+            <CButton color="secondary" type="button" onClick={() => setModalEditVisible(false)}>
+              Cancel
+            </CButton>
+            <CButton color="primary" type="submit" disabled={formik.isSubmitting}>
+              {formik.isSubmitting
+                ? selectedUserRole
+                  ? 'Updating...'
+                  : 'Assigning...'
+                : selectedUserRole
+                  ? 'Update Role'
+                  : 'Assign Role'}
+            </CButton>
+          </CModalFooter>
+        </form>
       </CModal>
     </div>
   )
